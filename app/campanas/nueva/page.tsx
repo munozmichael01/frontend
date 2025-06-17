@@ -208,7 +208,7 @@ export default function NuevaCampanaPage() {
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Columna principal */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Información básica */}
+            {/* Informaci��n básica */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
