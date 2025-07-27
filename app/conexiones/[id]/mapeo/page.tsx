@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import React from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -18,115 +19,78 @@ import {
   Settings,
   FileText,
   Zap,
+  Loader2,
+  Trash2,
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 
-export default function MapeoPage({ params }: { params: { id: string } }) {
+interface Conexion {
+  id: number
+  name: string
+  type: string
+  url: string
+  status: string
+}
+
+interface FieldMapping {
+  ConnectionId: number
+  SourceField: string
+  TargetField: string
+  TransformationType: string
+  TransformationRule?: string | null
+}
+
+interface SourceField {
+  name: string
+  type: string
+  sample: string
+  required: boolean
+  description: string
+}
+
+interface TargetField {
+  name: string
+  type: string
+  required: boolean
+  description: string
+}
+
+export default function MapeoPage({ params }: { params: Promise<{ id: string }> }) {
   const { toast } = useToast()
-  const connectionId = params.id
+  const router = useRouter()
 
-  // Datos simulados de la conexión
-  const conexion = {
-    id: connectionId,
-    name: "Feed Principal XML",
-    type: "XML",
-    url: "https://turijobs.com/feed/ofertas.xml",
-    status: "active",
-  }
+  // ✅ Unwrap params usando React.use()
+  const resolvedParams = React.use(params)
+  const connectionId = Number.parseInt(resolvedParams.id)
 
-  // Campos detectados automáticamente en la fuente de datos
-  const [sourceFields] = useState([
-    {
-      name: "job_title",
-      type: "string",
-      sample: "Desarrollador Frontend React",
-      required: true,
-      description: "Título del puesto de trabajo",
-    },
-    {
-      name: "company_name",
-      type: "string",
-      sample: "TechCorp Solutions",
-      required: true,
-      description: "Nombre de la empresa",
-    },
-    {
-      name: "job_description",
-      type: "text",
-      sample: "Buscamos desarrollador con experiencia en React...",
-      required: false,
-      description: "Descripción detallada del puesto",
-    },
-    {
-      name: "location_city",
-      type: "string",
-      sample: "Madrid",
-      required: true,
-      description: "Ciudad donde se ubica el puesto",
-    },
-    {
-      name: "salary_min",
-      type: "number",
-      sample: "35000",
-      required: false,
-      description: "Salario mínimo anual",
-    },
-    {
-      name: "salary_max",
-      type: "number",
-      sample: "45000",
-      required: false,
-      description: "Salario máximo anual",
-    },
-    {
-      name: "contract_type",
-      type: "string",
-      sample: "Indefinido",
-      required: false,
-      description: "Tipo de contrato",
-    },
-    {
-      name: "work_mode",
-      type: "string",
-      sample: "Presencial",
-      required: false,
-      description: "Modalidad de trabajo",
-    },
-    {
-      name: "experience_level",
-      type: "string",
-      sample: "3-5 años",
-      required: false,
-      description: "Nivel de experiencia requerido",
-    },
-    {
-      name: "publish_date",
-      type: "date",
-      sample: "2024-01-15",
-      required: true,
-      description: "Fecha de publicación",
-    },
-    {
-      name: "application_url",
-      type: "url",
-      sample: "https://turijobs.com/apply/12345",
-      required: true,
-      description: "URL para aplicar a la oferta",
-    },
-    {
-      name: "job_category",
-      type: "string",
-      sample: "Tecnología",
-      required: false,
-      description: "Categoría o sector del trabajo",
-    },
-  ])
+  console.log("🔍 URL params.id:", resolvedParams.id)
+  console.log("🔍 Parsed connectionId:", connectionId)
+
+  // Estados
+  const [conexion, setConexion] = useState<Conexion | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadingSourceFields, setLoadingSourceFields] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [showPreview, setShowPreview] = useState(false)
+
+  // Mapeos
+  const [currentMappings, setCurrentMappings] = useState<FieldMapping[]>([])
+  const [fieldMapping, setFieldMapping] = useState<{ [key: string]: string }>({})
+  const [transformations, setTransformations] = useState<{ [key: string]: string }>({})
+
+  // ✅ CAMPOS DINÁMICOS: Ahora se cargan desde el backend
+  const [sourceFields, setSourceFields] = useState<SourceField[]>([])
 
   // Esquema estándar de nuestra plataforma
-  const [targetFields] = useState([
+  const [targetFields] = useState<TargetField[]>([
     { name: "title", type: "string", required: true, description: "Título de la oferta" },
     { name: "company", type: "string", required: true, description: "Nombre de la empresa" },
     { name: "description", type: "text", required: false, description: "Descripción del puesto" },
@@ -141,21 +105,291 @@ export default function MapeoPage({ params }: { params: { id: string } }) {
     { name: "sector", type: "string", required: false, description: "Sector o categoría" },
   ])
 
-  // Estado del mapeo actual
-  const [fieldMapping, setFieldMapping] = useState<{ [key: string]: string }>({
-    title: "job_title",
-    company: "company_name",
-    location: "location_city",
-    published_at: "publish_date",
-    apply_url: "application_url",
-  })
+  // ✅ CARGAR CONEXIÓN
+  useEffect(() => {
+    const fetchConnection = async () => {
+      try {
+        setLoading(true)
+        console.log(`🔄 Cargando conexión ${connectionId}...`)
 
-  // Transformaciones adicionales
-  const [transformations, setTransformations] = useState<{ [key: string]: string }>({})
+        if (!connectionId || isNaN(connectionId)) {
+          throw new Error(`ID de conexión inválido: ${resolvedParams.id}`)
+        }
 
-  // Estado de vista previa
-  const [showPreview, setShowPreview] = useState(false)
+        const response = await fetch(`http://localhost:3002/api/connections/${connectionId}`)
+        console.log(`🌐 Petición a: http://localhost:3002/api/connections/${connectionId}`)
 
+        if (!response.ok) {
+          throw new Error(`Error al cargar conexión: ${response.status}`)
+        }
+
+        const conexionData = await response.json()
+        setConexion(conexionData)
+        console.log("✅ Conexión cargada:", conexionData)
+
+        setError(null)
+      } catch (err) {
+        console.error("❌ Error cargando conexión:", err)
+        const errorMessage = err instanceof Error ? err.message : "Error desconocido"
+        setError(errorMessage)
+        toast({
+          title: "Error al cargar conexión",
+          description: errorMessage,
+          variant: "destructive",
+        })
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchConnection()
+  }, [connectionId, toast, resolvedParams.id])
+
+  // ✅ CARGAR CAMPOS ORIGEN
+  useEffect(() => {
+    const fetchSourceFields = async () => {
+      if (!conexion) return
+
+      try {
+        setLoadingSourceFields(true)
+        console.log(`🔄 Cargando campos origen para conexión ${connectionId}...`)
+
+        const response = await fetch(`http://localhost:3002/api/connections/${connectionId}/fields`)
+        console.log(`🌐 Petición a: http://localhost:3002/api/connections/${connectionId}/fields`)
+
+        if (!response.ok) {
+          throw new Error(`Error al cargar campos origen: ${response.status}`)
+        }
+
+        const data = await response.json()
+        console.log("✅ Campos origen recibidos:", data)
+
+        if (data.success && data.fields && Array.isArray(data.fields)) {
+          setSourceFields(data.fields)
+          console.log(`✅ ${data.fields.length} campos origen cargados`)
+        } else {
+          console.warn("⚠️ Respuesta inesperada de fields:", data)
+          setSourceFields([])
+        }
+      } catch (err) {
+        console.error("❌ Error cargando campos origen:", err)
+        toast({
+          title: "Error al cargar campos origen",
+          description: "No se pudieron detectar los campos de la fuente de datos",
+          variant: "destructive",
+        })
+        setSourceFields([])
+      } finally {
+        setLoadingSourceFields(false)
+      }
+    }
+
+    fetchSourceFields()
+  }, [conexion, connectionId, toast])
+
+  // ✅ CARGAR MAPEO ACTUAL
+  useEffect(() => {
+    const fetchMapping = async () => {
+      if (!conexion) return
+
+      try {
+        console.log(`🔄 Cargando mapeo actual para conexión ${connectionId}...`)
+
+        const response = await fetch(`http://localhost:3002/api/connections/${connectionId}/mapping`)
+        if (response.ok) {
+          const mappingData = await response.json()
+          console.log("✅ Mapeo actual cargado:", mappingData)
+
+          setCurrentMappings(mappingData)
+
+          // Convertir a formato para la UI
+          const mappingObj: { [key: string]: string } = {}
+          const transformObj: { [key: string]: string } = {}
+
+          mappingData.forEach((mapping: FieldMapping) => {
+            mappingObj[mapping.TargetField] = mapping.SourceField
+            if (mapping.TransformationRule) {
+              transformObj[mapping.TargetField] = mapping.TransformationRule
+            }
+          })
+
+          setFieldMapping(mappingObj)
+          setTransformations(transformObj)
+        } else {
+          console.log("ℹ️ No hay mapeo existente, iniciando con mapeo vacío")
+          // Mapeo inicial sugerido basado en nombres similares
+          if (sourceFields.length > 0) {
+            const initialMapping: { [key: string]: string } = {}
+
+            // Intentar mapeo automático por nombres similares
+            sourceFields.forEach((sourceField) => {
+              const sourceName = sourceField.name.toLowerCase()
+              if (sourceName.includes("title") || sourceName.includes("job_title")) {
+                initialMapping.title = sourceField.name
+              } else if (sourceName.includes("company")) {
+                initialMapping.company = sourceField.name
+              } else if (sourceName.includes("location") || sourceName.includes("city")) {
+                initialMapping.location = sourceField.name
+              } else if (sourceName.includes("date") || sourceName.includes("publish")) {
+                initialMapping.published_at = sourceField.name
+              } else if (sourceName.includes("url") || sourceName.includes("link") || sourceName.includes("apply")) {
+                initialMapping.apply_url = sourceField.name
+              }
+            })
+
+            setFieldMapping(initialMapping)
+            console.log("✅ Mapeo inicial sugerido:", initialMapping)
+          }
+        }
+      } catch (err) {
+        console.error("❌ Error cargando mapeo:", err)
+      }
+    }
+
+    fetchMapping()
+  }, [conexion, connectionId, sourceFields])
+
+  // ✅ GUARDAR MAPEO
+  const saveMapping = async () => {
+    const errors = validateMapping()
+    if (errors.length > 0) {
+      toast({
+        title: "Error en el mapeo",
+        description: errors.join(", "),
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      setSaving(true)
+      console.log("🔄 Guardando mapeo...")
+
+      // Convertir a formato del backend
+      const mappings: FieldMapping[] = Object.entries(fieldMapping).map(([targetField, sourceField]) => ({
+        ConnectionId: connectionId,
+        SourceField: sourceField,
+        TargetField: targetField,
+        TransformationType: getTransformationType(targetField),
+        TransformationRule: transformations[targetField] || null,
+      }))
+
+      const response = await fetch(`http://localhost:3002/api/connections/${connectionId}/mappings`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ mappings }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+      console.log("✅ Mapeo guardado:", result)
+
+      toast({
+        title: "Mapeo guardado exitosamente",
+        description: "La configuración de mapeo ha sido guardada y está lista para usar",
+      })
+
+      setCurrentMappings(mappings)
+    } catch (err) {
+      console.error("❌ Error guardando mapeo:", err)
+      const errorMessage = err instanceof Error ? err.message : "Error desconocido"
+      toast({
+        title: "Error al guardar mapeo",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // ✅ PROBAR MAPEO
+  const testMapping = async () => {
+    try {
+      setTesting(true)
+      console.log("🔄 Probando mapeo...")
+
+      const response = await fetch(`http://localhost:3002/api/connections/${connectionId}/test-mapping`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ fieldMapping, transformations }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+      console.log("✅ Prueba de mapeo exitosa:", result)
+
+      toast({
+        title: "Prueba exitosa",
+        description: "El mapeo funciona correctamente con los datos de muestra",
+      })
+    } catch (err) {
+      console.error("❌ Error probando mapeo:", err)
+      const errorMessage = err instanceof Error ? err.message : "Error desconocido"
+      toast({
+        title: "Error en la prueba",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  // ✅ ELIMINAR CONEXIÓN
+  const deleteConnection = async () => {
+    try {
+      setDeleting(true)
+      console.log("🔄 Eliminando conexión...")
+
+      const response = await fetch(`http://localhost:3002/api/connections/${connectionId}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.message || `HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+      console.log("✅ Conexión eliminada:", result)
+
+      toast({
+        title: "Conexión eliminada",
+        description: "La conexión ha sido eliminada exitosamente",
+      })
+
+      // Redirigir a la lista de conexiones
+      router.push("/conexiones")
+    } catch (err) {
+      console.error("❌ Error eliminando conexión:", err)
+      const errorMessage = err instanceof Error ? err.message : "Error desconocido"
+      toast({
+        title: "Error al eliminar conexión",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  // Funciones auxiliares
   const mapField = (targetField: string, sourceField: string) => {
     setFieldMapping((prev) => ({
       ...prev,
@@ -174,11 +408,25 @@ export default function MapeoPage({ params }: { params: { id: string } }) {
   const setTransformation = (targetField: string, transformation: string) => {
     setTransformations((prev) => ({
       ...prev,
-      [targetField]: transformation,
+      [targetField]: transformation === "none" ? "" : transformation,
     }))
   }
 
-  const validateMapping = () => {
+  const getTransformationType = (targetField: string): string => {
+    const target = targetFields.find((f) => f.name === targetField)
+    switch (target?.type) {
+      case "number":
+        return "NUMBER"
+      case "date":
+        return "DATE"
+      case "text":
+        return "STRING"
+      default:
+        return "STRING"
+    }
+  }
+
+  const validateMapping = (): string[] => {
     const errors = []
     const requiredTargetFields = targetFields.filter((f) => f.required)
 
@@ -224,42 +472,45 @@ export default function MapeoPage({ params }: { params: { id: string } }) {
     return sample
   }
 
-  const saveMapping = () => {
-    const errors = validateMapping()
-    if (errors.length > 0) {
-      toast({
-        title: "Error en el mapeo",
-        description: errors.join(", "),
-        variant: "destructive",
-      })
-      return
-    }
-
-    toast({
-      title: "Mapeo guardado exitosamente",
-      description: "La configuración de mapeo ha sido guardada y está lista para usar",
-    })
-
-    console.log("Mapeo guardado:", { fieldMapping, transformations })
-  }
-
-  const testMapping = () => {
-    toast({
-      title: "Probando mapeo",
-      description: "Ejecutando prueba con datos de muestra...",
-    })
-
-    // Simular prueba
-    setTimeout(() => {
-      toast({
-        title: "Prueba exitosa",
-        description: "El mapeo funciona correctamente con los datos de muestra",
-      })
-    }, 2000)
-  }
-
   const sampleData = generateSampleData()
   const validationErrors = validateMapping()
+
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-6 p-6">
+        <div className="flex items-center gap-4">
+          <SidebarTrigger />
+          <div>
+            <h1 className="text-3xl font-bold">Mapeo de Campos</h1>
+            <p className="text-muted-foreground">Cargando configuración...</p>
+          </div>
+        </div>
+        <div className="flex justify-center items-center h-64">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </div>
+      </div>
+    )
+  }
+
+  if (error || !conexion) {
+    return (
+      <div className="flex flex-col gap-6 p-6">
+        <div className="flex items-center gap-4">
+          <SidebarTrigger />
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/conexiones">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Volver a Conexiones
+            </Link>
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold">Error</h1>
+            <p className="text-muted-foreground text-red-600">{error}</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -346,7 +597,9 @@ export default function MapeoPage({ params }: { params: { id: string } }) {
                     <TableCell>
                       <Select
                         value={fieldMapping[targetField.name] || "none"}
-                        onValueChange={(value) => mapField(targetField.name, value)}
+                        onValueChange={(value) =>
+                          value === "none" ? clearMapping(targetField.name) : mapField(targetField.name, value)
+                        }
                       >
                         <SelectTrigger className="w-full">
                           <SelectValue placeholder="Seleccionar campo..." />
@@ -411,32 +664,48 @@ export default function MapeoPage({ params }: { params: { id: string } }) {
               <CardTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5" />
                 Campos Detectados
+                {loadingSourceFields && <Loader2 className="h-4 w-4 animate-spin" />}
               </CardTitle>
               <CardDescription>Campos disponibles en la fuente de datos</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3 max-h-80 overflow-y-auto">
-                {sourceFields.map((field) => (
-                  <div key={field.name} className="p-3 border rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm">{field.description}</span>
-                      {field.required && (
-                        <Badge variant="outline" className="text-xs">
-                          Requerido
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      <div>
-                        {field.name} ({field.type})
+              {loadingSourceFields ? (
+                <div className="flex justify-center items-center h-32">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <span className="ml-2">Detectando campos...</span>
+                </div>
+              ) : sourceFields.length === 0 ? (
+                <div className="text-center py-8">
+                  <AlertTriangle className="h-12 w-12 text-orange-500 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">No se detectaron campos</h3>
+                  <p className="text-muted-foreground text-sm">
+                    Verifica que la conexión esté configurada correctamente y que la fuente de datos sea accesible.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-80 overflow-y-auto">
+                  {sourceFields.map((field) => (
+                    <div key={field.name} className="p-3 border rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">{field.description}</span>
+                        {field.required && (
+                          <Badge variant="outline" className="text-xs">
+                            Requerido
+                          </Badge>
+                        )}
                       </div>
-                      <div className="mt-1">
-                        <strong>Ejemplo:</strong> {field.sample}
+                      <div className="text-xs text-muted-foreground mt-1">
+                        <div>
+                          {field.name} ({field.type})
+                        </div>
+                        <div className="mt-1">
+                          <strong>Ejemplo:</strong> {field.sample}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -491,14 +760,68 @@ export default function MapeoPage({ params }: { params: { id: string } }) {
               <Eye className="h-4 w-4 mr-2" />
               {showPreview ? "Ocultar" : "Ver"} Vista Previa
             </Button>
-            <Button onClick={testMapping} variant="outline" className="w-full">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Probar Mapeo
+            <Button onClick={testMapping} variant="outline" className="w-full bg-transparent" disabled={testing}>
+              {testing ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Probando...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Probar Mapeo
+                </>
+              )}
             </Button>
-            <Button onClick={saveMapping} className="w-full" disabled={validationErrors.length > 0}>
-              <Save className="h-4 w-4 mr-2" />
-              Guardar Mapeo
+            <Button onClick={saveMapping} className="w-full" disabled={validationErrors.length > 0 || saving}>
+              {saving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Guardando...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Guardar Mapeo
+                </>
+              )}
             </Button>
+            
+            {/* Botón para eliminar conexión */}
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" className="w-full" disabled={deleting}>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Eliminar Conexión
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Esta acción eliminará permanentemente la conexión "{conexion?.name}" y todos sus mapeos de campos asociados. 
+                    Esta acción no se puede deshacer.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction 
+                    onClick={deleteConnection}
+                    disabled={deleting}
+                    className="bg-red-600 hover:bg-red-700"
+                  >
+                    {deleting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Eliminando...
+                      </>
+                    ) : (
+                      "Sí, eliminar"
+                    )}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </div>
       </div>

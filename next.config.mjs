@@ -3,13 +3,11 @@ const nextConfig = {
   // Configuración para evitar problemas con OneDrive
   output: 'standalone',
   
-  // Configuración para certificados SSL en desarrollo
-  experimental: {
-    serverComponentsExternalPackages: [],
-  },
+  // ✅ CORREGIDO: Movido de experimental a nivel raíz para Next.js 15
+  serverExternalPackages: [],
   
-  // Configuración de fuentes para evitar problemas de red
-  optimizeFonts: false,
+  // ✅ REMOVIDO: optimizeFonts ya no existe en Next.js 15
+  // optimizeFonts: false, // ❌ Esta opción ya no es válida
   
   // Configuración de ESLint para ignorar errores durante la construcción
   eslint: {
@@ -29,6 +27,11 @@ const nextConfig = {
   // Configuración de OneDrive
   trailingSlash: false,
   
+  // ✅ LIMPIADO: experimental ya no necesita serverComponentsExternalPackages
+  experimental: {
+    // Mantén aquí otras configuraciones experimentales si las necesitas en el futuro
+  },
+  
   // Configuración de webpack para evitar problemas de permisos
   webpack: (config, { isServer }) => {
     if (!isServer) {
@@ -42,3 +45,4 @@ const nextConfig = {
 };
 
 export default nextConfig;
+

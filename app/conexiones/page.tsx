@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -32,66 +32,310 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
+import { fetchConnections, createConnection, importConnection, uploadFile } from "@/lib/api-temp"
+
+interface Conexion {
+  id: number
+  name: string
+  Name: string
+  type: string
+  Type: string
+  url: string
+  Url: string
+  Endpoint: string
+  frequency: string
+  Frequency: string
+  status: string
+  Status: string
+  lastSync?: string
+  LastSync?: string
+  importedOffers?: number
+  ImportedOffers?: number
+  errorCount?: number
+  ErrorCount?: number
+}
 
 export default function ConexionesPage() {
   const { toast } = useToast()
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [conexiones, setConexiones] = useState<Conexion[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [importing, setImporting] = useState<Record<number, boolean>>({})
+
   const [newConnection, setNewConnection] = useState({
     name: "",
     type: "",
     url: "",
     frequency: "daily",
+    clientId: 1,
   })
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
-  const conexiones = [
-    {
-      id: 1,
-      name: "Feed Principal XML",
-      type: "XML",
-      url: "https://turijobs.com/feed/ofertas.xml",
-      frequency: "Cada hora",
-      status: "active",
-      lastSync: "2024-01-15T14:30:00",
-      offersImported: 156,
-      errors: 0,
-    },
-    {
-      id: 2,
-      name: "API Ofertas Premium",
-      type: "API",
-      url: "https://api.turijobs.com/v2/ofertas",
-      frequency: "Cada 30 min",
-      status: "active",
-      lastSync: "2024-01-15T14:00:00",
-      offersImported: 89,
-      errors: 0,
-    },
-    {
-      id: 3,
-      name: "Importación Manual CSV",
-      type: "Manual",
-      url: "ofertas_enero_2024.csv",
-      frequency: "Manual",
-      status: "pending",
-      lastSync: "2024-01-14T10:15:00",
-      offersImported: 23,
-      errors: 2,
-    },
-    {
-      id: 4,
-      name: "Feed Backup XML",
-      type: "XML",
-      url: "https://backup.turijobs.com/feed.xml",
-      frequency: "Diario",
-      status: "error",
-      lastSync: "2024-01-13T08:00:00",
-      offersImported: 0,
-      errors: 5,
-    },
-  ]
+  // ✅ FETCH CONEXIONES DESDE TU BACKEND REAL
+  const fetchConexiones = async () => {
+    try {
+      setLoading(true)
+      console.log("🔄 Fetching conexiones...")
+
+      const data = await fetchConnections()
+      console.log("✅ Conexiones recibidas:", data)
+
+      setConexiones(data)
+      setError(null)
+    } catch (err) {
+      console.error("❌ Error fetching conexiones:", err)
+      const errorMessage = err instanceof Error ? err.message : "Error desconocido"
+      setError(errorMessage)
+      toast({
+        title: "Error al cargar conexiones",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchConexiones()
+  }, [])
+
+  // ✅ CREAR NUEVA CONEXIÓN
+  const handleCreateConnection = async () => {
+    if (!newConnection.name || !newConnection.type) {
+      toast({
+        title: "Error",
+        description: "Por favor completa todos los campos obligatorios",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (newConnection.type === "Manual" && !selectedFile) {
+      toast({
+        title: "Error",
+        description: "Por favor selecciona un archivo para la conexión manual",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (newConnection.type !== "Manual" && !newConnection.url) {
+      toast({
+        title: "Error", 
+        description: "Por favor proporciona una URL para la conexión",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      setCreating(true)
+      console.log("🔄 Creando conexión:", newConnection)
+
+      const createdConnection = await createConnection(newConnection)
+      console.log("✅ Conexión creada:", createdConnection)
+
+      toast({
+        title: "Conexión creada exitosamente",
+        description: `La conexión "${newConnection.name}" ha sido creada.`,
+      })
+
+      // ✅ IMPORTACIÓN AUTOMÁTICA INMEDIATA (solo para XML y API)
+      console.log(`🔍 Tipo de conexión: ${newConnection.type}`)
+      if (newConnection.type !== "Manual") {
+        console.log("🚀 Iniciando proceso de sincronización automática...")
+        setTimeout(async () => {
+          try {
+            console.log(`🔄 Ejecutando importación automática para conexión ${createdConnection.id} (tipo: ${newConnection.type})...`)
+
+            const importResult = await importConnection(createdConnection.id)
+            console.log("✅ Importación automática completada:", importResult)
+
+            toast({
+              title: "Sincronización completada",
+              description: `Se importaron ${importResult.processed || 0} ofertas automáticamente`,
+            })
+          } catch (importError) {
+            console.error("❌ Error en importación automática:", importError)
+            toast({
+              title: "Conexión creada",
+              description: "La conexión fue creada. La sincronización inicial falló, puedes sincronizar manualmente.",
+              variant: "destructive",
+            })
+          }
+
+          // Refrescar lista después de la importación
+          await fetchConexiones()
+        }, 2000) // Aumentado a 2 segundos para dar tiempo al backend
+      } else {
+        // Para conexiones manuales, solo mostrar mensaje de éxito
+        console.log("📁 Conexión manual creada - no se requiere sincronización automática")
+        toast({
+          title: "Conexión manual creada",
+          description: "La conexión manual ha sido creada exitosamente. Usa el botón de sincronización para procesar el archivo.",
+        })
+      }
+
+      // Limpiar formulario y cerrar dialog
+      setNewConnection({ name: "", type: "", url: "", frequency: "daily", clientId: 1 })
+      setSelectedFile(null)
+      setIsDialogOpen(false)
+
+      // Refrescar lista inmediatamente
+      await fetchConexiones()
+    } catch (err) {
+      console.error("❌ Error creando conexión:", err)
+      const errorMessage = err instanceof Error ? err.message : "Error desconocido"
+      toast({
+        title: "Error al crear conexión",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  // ✅ SINCRONIZAR OFERTAS
+  const handleSync = async (connectionId: number) => {
+    try {
+      setImporting((prev) => ({ ...prev, [connectionId]: true }))
+      console.log(`🔄 Importando ofertas para conexión ${connectionId}...`)
+
+      // Encontrar la conexión para verificar el tipo
+      const conexion = conexiones.find(c => c.id === connectionId)
+      const connectionType = getConnectionType(conexion || {} as Conexion)
+
+      if (connectionType.toLowerCase() === "manual") {
+        // Para conexiones manuales, solicitar archivo
+        const fileInput = document.createElement('input')
+        fileInput.type = 'file'
+        fileInput.accept = '.xml,.csv,.json'
+        fileInput.onchange = async (e) => {
+          const file = (e.target as HTMLInputElement).files?.[0]
+          if (file) {
+            try {
+              console.log(`📁 Subiendo archivo ${file.name} para conexión ${connectionId}...`)
+              const result = await uploadFile(connectionId, file)
+              console.log("✅ Upload completado:", result)
+
+              toast({
+                title: "Archivo procesado exitosamente",
+                description: `Se procesaron ${result.processed || 0} ofertas del archivo ${result.filename}`,
+              })
+
+              // Refrescar lista
+              await fetchConexiones()
+            } catch (uploadErr) {
+              console.error("❌ Error en upload:", uploadErr)
+              const errorMessage = uploadErr instanceof Error ? uploadErr.message : "Error desconocido"
+              toast({
+                title: "Error procesando archivo",
+                description: errorMessage,
+                variant: "destructive",
+              })
+            } finally {
+              setImporting((prev) => ({ ...prev, [connectionId]: false }))
+            }
+          } else {
+            setImporting((prev) => ({ ...prev, [connectionId]: false }))
+          }
+        }
+        fileInput.click()
+        return
+      }
+
+      // Para conexiones XML/API, usar importación normal
+      const result = await importConnection(connectionId)
+      console.log("✅ Importación completada:", result)
+
+      toast({
+        title: "Sincronización exitosa",
+        description: result.message || `Se importaron ${result.processed || 0} ofertas correctamente`,
+      })
+
+      // Refrescar lista
+      await fetchConexiones()
+    } catch (err) {
+      console.error("❌ Error en sincronización:", err)
+      const errorMessage = err instanceof Error ? err.message : "Error desconocido"
+      toast({
+        title: "Error en sincronización",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    } finally {
+      setImporting((prev) => ({ ...prev, [connectionId]: false }))
+    }
+  }
+
+  // ✅ FUNCIONES PARA CALCULAR ESTADÍSTICAS CORRECTAMENTE - ARREGLADAS
+  const getTotalOffers = () => {
+    return conexiones.reduce((sum, c) => {
+      // Intentar diferentes nombres de campo que puede tener el backend
+      const offers = c.importedOffers || c.ImportedOffers || 0
+      const numOffers = typeof offers === "number" ? offers : Number.parseInt(offers) || 0
+      return sum + numOffers
+    }, 0)
+  }
+
+  const getTotalErrors = () => {
+    return conexiones.reduce((sum, c) => {
+      // Intentar diferentes nombres de campo que puede tener el backend
+      const errors = c.errorCount || c.ErrorCount || 0
+      const numErrors = typeof errors === "number" ? errors : Number.parseInt(errors) || 0
+      return sum + numErrors
+    }, 0)
+  }
+
+  const getActiveConnections = () => {
+    return conexiones.filter((c) => {
+      const status = c.status || c.Status || ""
+      return status.toLowerCase() === "active"
+    }).length
+  }
+
+  // ✅ FUNCIONES HELPER PARA MANEJAR DIFERENTES FORMATOS DE DATOS
+  const getConnectionName = (conexion: Conexion) => {
+    return conexion.name || conexion.Name || "Sin nombre"
+  }
+
+  const getConnectionType = (conexion: Conexion) => {
+    return conexion.type || conexion.Type || "Desconocido"
+  }
+
+  const getConnectionUrl = (conexion: Conexion) => {
+    return conexion.url || conexion.Url || conexion.Endpoint || ""
+  }
+
+  const getConnectionFrequency = (conexion: Conexion) => {
+    return conexion.frequency || conexion.Frequency || "manual"
+  }
+
+  const getConnectionStatus = (conexion: Conexion) => {
+    return conexion.status || conexion.Status || "pending"
+  }
+
+  const getConnectionLastSync = (conexion: Conexion) => {
+    return conexion.lastSync || conexion.LastSync
+  }
+
+  const getConnectionOffers = (conexion: Conexion) => {
+    const offers = conexion.importedOffers || conexion.ImportedOffers || 0
+    return typeof offers === "number" ? offers : Number.parseInt(offers) || 0
+  }
+
+  const getConnectionErrors = (conexion: Conexion) => {
+    const errors = conexion.errorCount || conexion.ErrorCount || 0
+    return typeof errors === "number" ? errors : Number.parseInt(errors) || 0
+  }
 
   const getStatusIcon = (status: string) => {
-    switch (status) {
+    const normalizedStatus = status.toLowerCase()
+    switch (normalizedStatus) {
       case "active":
         return <CheckCircle className="h-4 w-4 text-green-600" />
       case "error":
@@ -104,7 +348,8 @@ export default function ConexionesPage() {
   }
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
+    const normalizedStatus = status.toLowerCase()
+    switch (normalizedStatus) {
       case "active":
         return <Badge className="bg-green-100 text-green-800">Activa</Badge>
       case "error":
@@ -117,19 +362,21 @@ export default function ConexionesPage() {
   }
 
   const getTypeIcon = (type: string) => {
-    switch (type) {
+    const normalizedType = type.toUpperCase()
+    switch (normalizedType) {
       case "XML":
         return <FileText className="h-4 w-4" />
       case "API":
         return <Globe className="h-4 w-4" />
-      case "Manual":
+      case "MANUAL":
         return <Upload className="h-4 w-4" />
       default:
         return <Database className="h-4 w-4" />
     }
   }
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return "Nunca"
     const date = new Date(dateString)
     return date.toLocaleDateString("es-ES", {
       day: "2-digit",
@@ -140,30 +387,48 @@ export default function ConexionesPage() {
     })
   }
 
-  const handleSync = (connectionId: number) => {
-    toast({
-      title: "Sincronización iniciada",
-      description: "La sincronización se ha iniciado correctamente",
-    })
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-6 p-6">
+        <div className="flex items-center gap-4">
+          <SidebarTrigger />
+          <div>
+            <h1 className="text-3xl font-bold">Conexiones de Datos</h1>
+            <p className="text-muted-foreground">Cargando conexiones...</p>
+          </div>
+        </div>
+        <div className="flex justify-center items-center h-64">
+          <RefreshCw className="h-8 w-8 animate-spin" />
+        </div>
+      </div>
+    )
   }
 
-  const handleCreateConnection = () => {
-    if (!newConnection.name || !newConnection.type) {
-      toast({
-        title: "Error",
-        description: "Por favor completa todos los campos obligatorios",
-        variant: "destructive",
-      })
-      return
-    }
-
-    toast({
-      title: "Conexión creada",
-      description: `La conexión "${newConnection.name}" ha sido creada exitosamente`,
-    })
-
-    setNewConnection({ name: "", type: "", url: "", frequency: "daily" })
-    setIsDialogOpen(false)
+  if (error) {
+    return (
+      <div className="flex flex-col gap-6 p-6">
+        <div className="flex items-center gap-4">
+          <SidebarTrigger />
+          <div>
+            <h1 className="text-3xl font-bold">Conexiones de Datos</h1>
+            <p className="text-muted-foreground text-red-600">Error: {error}</p>
+          </div>
+        </div>
+        <Card>
+          <CardContent className="p-6">
+            <div className="text-center">
+              <AlertTriangle className="h-12 w-12 text-red-600 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Error al cargar conexiones</h3>
+              <p className="text-muted-foreground mb-4">{error}</p>
+              <Button onClick={fetchConexiones}>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Reintentar
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
   return (
@@ -176,84 +441,114 @@ export default function ConexionesPage() {
             <p className="text-muted-foreground">Gestiona las fuentes de datos para importar ofertas</p>
           </div>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              Nueva Conexión
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Nueva Conexión de Datos</DialogTitle>
-              <DialogDescription>Configura una nueva fuente de datos para importar ofertas</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Nombre de la conexión *</Label>
-                <Input
-                  id="name"
-                  value={newConnection.name}
-                  onChange={(e) => setNewConnection((prev) => ({ ...prev, name: e.target.value }))}
-                  placeholder="Ej: Feed Principal XML"
-                />
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={fetchConexiones}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Actualizar
+          </Button>
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                Nueva Conexión
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Nueva Conexión de Datos</DialogTitle>
+                <DialogDescription>Configura una nueva fuente de datos para importar ofertas</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="name">Nombre de la conexión *</Label>
+                  <Input
+                    id="name"
+                    value={newConnection.name}
+                    onChange={(e) => setNewConnection((prev) => ({ ...prev, name: e.target.value }))}
+                    placeholder="Ej: Feed Principal XML"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="type">Tipo de conexión *</Label>
+                  <Select
+                    value={newConnection.type}
+                    onValueChange={(value) => setNewConnection((prev) => ({ ...prev, type: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecciona el tipo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="XML">XML Feed</SelectItem>
+                      <SelectItem value="API">API REST</SelectItem>
+                      <SelectItem value="Manual">Carga Manual</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="url">URL o Archivo *</Label>
+                  {newConnection.type === "Manual" ? (
+                    <div className="space-y-2">
+                      <Input
+                        type="file"
+                        accept=".xml,.csv,.json"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          setSelectedFile(file || null)
+                          setNewConnection((prev) => ({ ...prev, url: file?.name || "" }))
+                        }}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Formatos soportados: XML, CSV, JSON
+                      </p>
+                    </div>
+                  ) : (
+                    <Input
+                      id="url"
+                      value={newConnection.url}
+                      onChange={(e) => setNewConnection((prev) => ({ ...prev, url: e.target.value }))}
+                      placeholder="https://ejemplo.com/feed.xml"
+                    />
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="frequency">Frecuencia de actualización</Label>
+                  <Select
+                    value={newConnection.frequency}
+                    onValueChange={(value) => setNewConnection((prev) => ({ ...prev, frequency: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="manual">Manual</SelectItem>
+                      <SelectItem value="hourly">Cada hora</SelectItem>
+                      <SelectItem value="daily">Diario</SelectItem>
+                      <SelectItem value="weekly">Semanal</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex gap-2 pt-4">
+                  <Button onClick={handleCreateConnection} className="flex-1" disabled={creating}>
+                    {creating ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                        Creando...
+                      </>
+                    ) : (
+                      "Crear Conexión"
+                    )}
+                  </Button>
+                  <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={creating}>
+                    Cancelar
+                  </Button>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="type">Tipo de conexión *</Label>
-                <Select
-                  value={newConnection.type}
-                  onValueChange={(value) => setNewConnection((prev) => ({ ...prev, type: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecciona el tipo" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="XML">XML Feed</SelectItem>
-                    <SelectItem value="API">API REST</SelectItem>
-                    <SelectItem value="Manual">Carga Manual</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="url">URL o Archivo</Label>
-                <Input
-                  id="url"
-                  value={newConnection.url}
-                  onChange={(e) => setNewConnection((prev) => ({ ...prev, url: e.target.value }))}
-                  placeholder="https://ejemplo.com/feed.xml"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="frequency">Frecuencia de actualización</Label>
-                <Select
-                  value={newConnection.frequency}
-                  onValueChange={(value) => setNewConnection((prev) => ({ ...prev, frequency: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="manual">Manual</SelectItem>
-                    <SelectItem value="hourly">Cada hora</SelectItem>
-                    <SelectItem value="daily">Diario</SelectItem>
-                    <SelectItem value="weekly">Semanal</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex gap-2 pt-4">
-                <Button onClick={handleCreateConnection} className="flex-1">
-                  Crear Conexión
-                </Button>
-                <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
-                  Cancelar
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
-      {/* Estadísticas rápidas */}
+      {/* ✅ ESTADÍSTICAS ARREGLADAS */}
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
@@ -268,9 +563,7 @@ export default function ConexionesPage() {
             <CardTitle className="text-sm font-medium">Conexiones Activas</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">
-              {conexiones.filter((c) => c.status === "active").length}
-            </div>
+            <div className="text-2xl font-bold text-green-600">{getActiveConnections()}</div>
           </CardContent>
         </Card>
         <Card>
@@ -278,7 +571,7 @@ export default function ConexionesPage() {
             <CardTitle className="text-sm font-medium">Ofertas Importadas</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{conexiones.reduce((sum, c) => sum + c.offersImported, 0)}</div>
+            <div className="text-2xl font-bold">{getTotalOffers().toLocaleString()}</div>
           </CardContent>
         </Card>
         <Card>
@@ -286,92 +579,108 @@ export default function ConexionesPage() {
             <CardTitle className="text-sm font-medium">Errores Totales</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">{conexiones.reduce((sum, c) => sum + c.errors, 0)}</div>
+            <div className="text-2xl font-bold text-red-600">{getTotalErrors()}</div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Lista de conexiones */}
+      {/* ✅ TABLA ARREGLADA */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Database className="h-5 w-5" />
             Conexiones Configuradas
           </CardTitle>
-          <CardDescription>Administra tus fuentes de datos y su estado de sincronización</CardDescription>
+          <CardDescription>
+            Administra tus fuentes de datos y su estado de sincronización ({conexiones.length} conexiones)
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Conexión</TableHead>
-                <TableHead>Tipo</TableHead>
-                <TableHead>Frecuencia</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>Última Sincronización</TableHead>
-                <TableHead>Ofertas</TableHead>
-                <TableHead>Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {conexiones.map((conexion) => (
-                <TableRow key={conexion.id}>
-                  <TableCell>
-                    <div className="space-y-1">
-                      <div className="font-medium">{conexion.name}</div>
-                      <div className="text-sm text-muted-foreground truncate max-w-[200px]">{conexion.url}</div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      {getTypeIcon(conexion.type)}
-                      <span>{conexion.type}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-sm">{conexion.frequency}</span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      {getStatusIcon(conexion.status)}
-                      {getStatusBadge(conexion.status)}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="text-sm text-muted-foreground">{formatDate(conexion.lastSync)}</div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="space-y-1">
-                      <div className="text-sm font-medium">{conexion.offersImported} importadas</div>
-                      {conexion.errors > 0 && (
-                        <div className="flex items-center gap-1 text-xs text-red-600">
-                          <AlertTriangle className="h-3 w-3" />
-                          {conexion.errors} errores
-                        </div>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleSync(conexion.id)}
-                        disabled={conexion.status === "error"}
-                      >
-                        <RefreshCw className="h-4 w-4" />
-                      </Button>
-                      <Button variant="outline" size="sm" asChild>
-                        <Link href={`/conexiones/${conexion.id}/mapeo`}>
-                          <Settings className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                    </div>
-                  </TableCell>
+          {conexiones.length === 0 ? (
+            <div className="text-center py-8">
+              <Database className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No hay conexiones</h3>
+              <p className="text-muted-foreground">Crea tu primera conexión para empezar</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Conexión</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Frecuencia</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead>Última Sincronización</TableHead>
+                  <TableHead>Ofertas</TableHead>
+                  <TableHead>Acciones</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {conexiones.map((conexion) => (
+                  <TableRow key={conexion.id}>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <div className="font-medium">{getConnectionName(conexion)}</div>
+                        <div className="text-sm text-muted-foreground truncate max-w-[200px]">
+                          {getConnectionUrl(conexion)}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {getTypeIcon(getConnectionType(conexion))}
+                        <span>{getConnectionType(conexion)}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm">{getConnectionFrequency(conexion)}</span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {getStatusIcon(getConnectionStatus(conexion))}
+                        {getStatusBadge(getConnectionStatus(conexion))}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm text-muted-foreground">{formatDate(getConnectionLastSync(conexion))}</div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <div className="text-sm font-medium">{getConnectionOffers(conexion).toLocaleString()}</div>
+                        {getConnectionErrors(conexion) > 0 && (
+                          <div className="flex items-center gap-1 text-xs text-red-600">
+                            <AlertTriangle className="h-3 w-3" />
+                            {getConnectionErrors(conexion)} errores
+                          </div>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleSync(conexion.id)}
+                          disabled={getConnectionStatus(conexion) === "error" || importing[conexion.id]}
+                        >
+                          {importing[conexion.id] ? (
+                            <RefreshCw className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4" />
+                          )}
+                        </Button>
+                        <Button variant="outline" size="sm" asChild>
+                          <Link href={`/conexiones/${conexion.id}/mapeo`}>
+                            <Settings className="h-4 w-4" />
+                          </Link>
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
@@ -424,26 +733,30 @@ export default function ConexionesPage() {
                 <CheckCircle className="h-4 w-4 text-green-600" />
                 <span className="text-sm">Conexiones activas</span>
               </div>
-              <span className="font-medium">{conexiones.filter((c) => c.status === "active").length}</span>
+              <span className="font-medium">{getActiveConnections()}</span>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <XCircle className="h-4 w-4 text-red-600" />
                 <span className="text-sm">Conexiones con error</span>
               </div>
-              <span className="font-medium">{conexiones.filter((c) => c.status === "error").length}</span>
+              <span className="font-medium">
+                {conexiones.filter((c) => getConnectionStatus(c).toLowerCase() === "error").length}
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-orange-600" />
                 <span className="text-sm">Conexiones pendientes</span>
               </div>
-              <span className="font-medium">{conexiones.filter((c) => c.status === "pending").length}</span>
+              <span className="font-medium">
+                {conexiones.filter((c) => getConnectionStatus(c).toLowerCase() === "pending").length}
+              </span>
             </div>
             <div className="pt-2 border-t">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">Total ofertas importadas</span>
-                <span className="font-bold">{conexiones.reduce((sum, c) => sum + c.offersImported, 0)}</span>
+                <span className="font-bold">{getTotalOffers().toLocaleString()}</span>
               </div>
             </div>
           </CardContent>
